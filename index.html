@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>강의 녹음 합치기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one narrow working column — drop zone, ordered tape list with a proportional timeline, merge, then the transcription step. */
+:root {
+  --bg: #f3f5f6;
+  --surface: #ffffff;
+  --ink: #17232b;
+  --muted: #5d6c75;
+  --line: #d9e0e4;
+  --accent: #1d5a7a;
+  --accent-soft: #e2edf3;
+  --rec: #d0532b;
+  --ok: #2f7d4f;
+  --ok-soft: #e4f2ea;
+  --warn: #9a6a12;
+  --warn-soft: #f7efdc;
+  --err: #b23a2e;
+  --seg1: #1d5a7a; --seg2: #4f8fa8; --seg3: #8db8c6; --seg4: #b9cfd6;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11181d; --surface: #182229; --ink: #e5ecef; --muted: #93a4ad; --line: #2a3841;
+    --accent: #6fb1d2; --accent-soft: #1d3240; --rec: #ef7a52; --ok: #6cc28f; --ok-soft: #173023;
+    --warn: #e2b55a; --warn-soft: #34290f; --err: #f08a7e;
+    --seg1: #6fb1d2; --seg2: #4d8aa6; --seg3: #35667c; --seg4: #2a4d5c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11181d; --surface: #182229; --ink: #e5ecef; --muted: #93a4ad; --line: #2a3841;
+  --accent: #6fb1d2; --accent-soft: #1d3240; --rec: #ef7a52; --ok: #6cc28f; --ok-soft: #173023;
+  --warn: #e2b55a; --warn-soft: #34290f; --err: #f08a7e;
+  --seg1: #6fb1d2; --seg2: #4d8aa6; --seg3: #35667c; --seg4: #2a4d5c;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body);
+  font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 56px;
+}
+.wrap { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+header { display: flex; flex-direction: column; gap: 4px; }
+.eyebrow { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--rec); }
+h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+.lede { margin: 0; color: var(--muted); max-width: 58ch; }
+
+.drop {
+  border: 1.5px dashed var(--line); border-radius: 12px; background: var(--surface);
+  padding: 22px 18px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
+  cursor: pointer; transition: border-color .15s, background .15s;
+}
+.drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.drop strong { font-size: 16px; }
+.drop span { color: var(--muted); font-size: 13px; }
+.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.panel h2 { margin: 0; font-size: 15px; font-weight: 600; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.total { font-family: var(--font-mono); font-size: 13px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.timeline { display: flex; height: 14px; border-radius: 4px; overflow: hidden; gap: 2px; background: var(--line); }
+.timeline div { height: 100%; min-width: 3px; }
+
+ol.files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+ol.files li { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+ol.files li:first-child { border-top: 0; padding-top: 0; }
+.idx { font-family: var(--font-mono); font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.meta { min-width: 0; }
+.name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spec { font-family: var(--font-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.spec.err { color: var(--err); font-family: var(--font-body); }
+.row-actions { display: flex; gap: 4px; }
+.icon-btn { width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink); font-size: 14px; cursor: pointer; display: grid; place-items: center; }
+.icon-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.icon-btn:disabled { opacity: .35; cursor: default; }
+.icon-btn:focus-visible, .btn:focus-visible, .linkbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.mode { border-radius: 8px; padding: 10px 12px; font-size: 13.5px; display: flex; gap: 10px; align-items: flex-start; }
+.mode b { white-space: nowrap; }
+.mode.copy { background: var(--ok-soft); color: var(--ink); }
+.mode.copy b { color: var(--ok); }
+.mode.enc { background: var(--warn-soft); }
+.mode.enc b { color: var(--warn); }
+
+.btn { appearance: none; border: 0; border-radius: 10px; padding: 12px 18px; font: inherit; font-weight: 600; cursor: pointer; background: var(--accent); color: var(--surface); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.btn.ghost:hover { border-color: var(--accent); }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+.progress { display: flex; flex-direction: column; gap: 6px; }
+.bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s linear; }
+.progress .spec { display: flex; justify-content: space-between; }
+
+.result-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat small { font-size: 12px; color: var(--muted); }
+.stat b { font-family: var(--font-mono); font-size: 17px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.note { font-size: 13px; color: var(--muted); margin: 0; }
+.msg { font-size: 13.5px; margin: 0; }
+.msg.err { color: var(--err); }
+.msg.ok { color: var(--ok); }
+
+.fmt { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.fmt legend { font-size: 13px; color: var(--muted); margin-bottom: 6px; padding: 0; }
+.fmt label { position: relative; cursor: pointer; }
+.fmt input { position: absolute; opacity: 0; }
+.fmt span { display: flex; flex-direction: column; gap: 2px; border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.fmt span b { font-family: var(--font-mono); font-weight: 500; font-size: 15px; }
+.fmt span small { font-size: 12px; color: var(--muted); }
+.fmt input:checked + span { border-color: var(--accent); background: var(--accent-soft); }
+.fmt input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fmt input:disabled + span { opacity: .5; cursor: default; }
+.ask { display: flex; flex-direction: column; gap: 12px; }
+.ask p { margin: 0; }
+.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.prompt { font-family: var(--font-mono); font-size: 12.5px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; white-space: pre-wrap; margin: 0; max-height: 220px; overflow: auto; }
+.linkbtn { color: var(--accent); font-weight: 600; text-decoration: none; }
+.linkbtn:hover { text-decoration: underline; }
+.example { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
+
+@media (max-width: 460px) {
+  h1 { font-size: 22px; }
+  .result-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow"><span class="dot"></span>Lecture Recorder Tool</div>
+    <h1>강의 녹음 합치기</h1>
+    <p class="lede">녹음 파일 여러 개를 순서대로 이어 붙여 한 파일로 만들어요. 파일은 이 컴퓨터의 브라우저 안에서만 처리되고 어디에도 올라가지 않아요. 처음 열 때만 인터넷 연결이 필요해요.</p>
+  </header>
+
+  <label class="drop" id="drop" for="picker">
+    <input id="picker" type="file" multiple accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.opus,.flac,.mp4,.webm">
+    <strong>녹음 파일을 끌어 놓거나 눌러서 고르기</strong>
+    <span>m4a · mp3 · wav · aac · ogg · flac 지원 · 고른 순서대로 이어 붙여요</span>
+  </label>
+
+  <section class="panel" id="listPanel">
+    <h2><span id="listTitle">이어 붙일 순서</span><span class="total" id="total"></span></h2>
+    <div class="timeline" id="timeline" aria-hidden="true"></div>
+    <ol class="files" id="files"></ol>
+    <div id="mode"></div>
+    <div class="actions">
+      <button class="btn" id="mergeBtn" type="button" disabled>한 파일로 합치기</button>
+      <button class="btn ghost" id="clearBtn" type="button" hidden>모두 비우기</button>
+    </div>
+    <div class="progress" id="progress" hidden>
+      <div class="bar"><i id="barFill"></i></div>
+      <div class="spec"><span id="progText">준비 중</span><span id="progPct">0%</span></div>
+    </div>
+    <p class="msg" id="msg" hidden></p>
+  </section>
+
+  <section class="panel" id="resultPanel" hidden>
+    <h2><span>합본 완성</span><span class="total" id="resultName"></span></h2>
+    <div class="result-grid">
+      <div class="stat"><small>총 길이</small><b id="rDur"></b></div>
+      <div class="stat"><small>파일 크기</small><b id="rSize"></b></div>
+      <div class="stat"><small>걸린 시간</small><b id="rTime"></b></div>
+    </div>
+    <fieldset class="fmt" id="fmt">
+      <legend>저장 형식</legend>
+      <label><input type="radio" name="fmt" id="fmtM4a" value="m4a" checked><span><b>M4A</b><small>바로 저장 · 음질 그대로</small></span></label>
+      <label><input type="radio" name="fmt" id="fmtMp3" value="mp3"><span><b>MP3</b><small>한 번 변환 · 90분에 1분 안팎</small></span></label>
+    </fieldset>
+    <div class="progress" id="convProgress" hidden>
+      <div class="bar"><i id="convFill"></i></div>
+      <div class="spec"><span>MP3로 변환하는 중</span><span id="convPct">0%</span></div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="saveBtn" type="button">M4A로 저장하기</button>
+      <span class="msg" id="saveMsg" hidden></span>
+    </div>
+    <p class="note">버튼을 누르면 다운로드 폴더에 바로 저장돼요.</p>
+
+    <div class="ask" id="ask">
+      <p><b>전사도 하시겠습니까?</b></p>
+      <div class="actions">
+        <button class="btn" id="yesBtn" type="button">예, 전사할게요</button>
+        <button class="btn ghost" id="noBtn" type="button">아니요</button>
+      </div>
+    </div>
+    <div class="ask" id="transcribe" hidden>
+      <p><b>전사는 이렇게 진행해요</b></p>
+      <p class="note">이 페이지는 보안상 외부 음성인식 서버에 연결할 수 없어서, 전사 자체는 쓰시던 서비스에서 해야 해요. 대신 그 과정을 최대한 짧게 만들어 두었어요.</p>
+      <ol class="steps">
+        <li>위의 <b>합본 저장하기</b>로 파일을 저장해요.</li>
+        <li>유니브나 클로바노트 같은 전사 서비스에 그 파일 하나만 올려요. <a class="linkbtn" href="https://clovanote.naver.com" target="_blank" rel="noopener">클로바노트 열기 ↗</a></li>
+        <li>전사된 텍스트를 Claude에 붙여넣을 때 아래 요청문을 맨 위에 함께 붙여요.</li>
+      </ol>
+      <pre class="prompt" id="promptText"></pre>
+      <div class="actions">
+        <button class="btn ghost" id="copyBtn" type="button">요청문 복사</button>
+        <span class="msg" id="copyMsg" hidden></span>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script type="importmap">{"imports":{"mediabunny":"https://cdn.jsdelivr.net/npm/mediabunny@1.61.3/dist/bundles/mediabunny.min.mjs","@mediabunny/mp3-encoder":"https://cdn.jsdelivr.net/npm/@mediabunny/mp3-encoder@1.61.3/dist/bundles/mediabunny-mp3-encoder.min.mjs"}}</script>
+<script type="module">
+const $ = id => document.getElementById(id);
+const SEGS = ['var(--seg1)', 'var(--seg2)', 'var(--seg3)', 'var(--seg4)'];
+const state = { items: [], busy: false, result: null, MB: null, merger: null, mp3Ok: false };
+
+const fmtTime = s => {
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(sec).padStart(2, '0');
+};
+const fmtSize = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+const codecName = c => ({ aac: 'AAC', mp3: 'MP3', opus: 'Opus', vorbis: 'Vorbis', flac: 'FLAC' }[c] || (c && c.startsWith('pcm') ? 'WAV' : (c || '?')));
+
+const PROMPT = `아래는 강의 녹음을 전사한 텍스트야. 전사 오류(동음이의어, 끊긴 문장)는 문맥에 맞게 바로잡아서 읽어 줘.
+
+1. 강의 핵심 내용을 주제별로 정리해 줘.
+2. 시험 대비 예상 문제를 만들어 줘. 교수님이 수업 중에 학생에게 던진 질문은 반드시 문제에 포함해 줘.
+3. 교수님이 "시험에 나온다", "중요하다"고 강조한 부분은 따로 표시해 줘.
+
+[전사 텍스트]
+`;
+$('promptText').textContent = PROMPT;
+
+/* ---------- example state so the page shows what it does before any file ---------- */
+function renderExample() {
+  const ex = [['강의_1교시.m4a', 2950], ['강의_2교시.m4a', 2880], ['강의_3교시.m4a', 1410]];
+  const tot = ex.reduce((s, e) => s + e[1], 0);
+  $('listTitle').innerHTML = '이어 붙일 순서 <span class="example">예시</span>';
+  $('total').textContent = '총 ' + fmtTime(tot);
+  $('timeline').innerHTML = ex.map((e, i) => `<div style="flex:${e[1]};background:${SEGS[i]}"></div>`).join('');
+  $('files').innerHTML = ex.map((e, i) => `<li><div class="idx"><span class="swatch" style="background:${SEGS[i]}"></span>${i + 1}</div>
+    <div class="meta"><div class="name">${e[0]}</div><div class="spec">AAC · 44.1 kHz · ${fmtTime(e[1])}</div></div><div></div></li>`).join('');
+  $('mode').innerHTML = `<div class="mode copy"><b>무손실 모드</b><span>세 파일 모두 같은 녹음기 형식이면 다시 압축하지 않고 이어 붙여요. 90분 분량도 보통 10초 안팎이에요.</span></div>`;
+  $('mergeBtn').disabled = true;
+  $('clearBtn').hidden = true;
+}
+
+function render() {
+  if (!state.items.length) return renderExample();
+  const ok = state.items.filter(i => i.info);
+  const tot = ok.reduce((s, i) => s + i.info.duration, 0);
+  $('listTitle').textContent = '이어 붙일 순서';
+  $('total').textContent = ok.length ? '총 ' + fmtTime(tot) : '';
+  $('timeline').innerHTML = state.items.map((it, i) =>
+    `<div style="flex:${it.info ? Math.max(it.info.duration, 1) : 1};background:${it.info ? SEGS[i % 4] : 'transparent'}"></div>`).join('');
+  $('files').innerHTML = '';
+  state.items.forEach((it, i) => {
+    const li = document.createElement('li');
+    const idx = document.createElement('div'); idx.className = 'idx';
+    idx.innerHTML = `<span class="swatch" style="background:${SEGS[i % 4]}"></span>${i + 1}`;
+    const meta = document.createElement('div'); meta.className = 'meta';
+    const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = it.file.name; nm.title = it.file.name;
+    const sp = document.createElement('div'); sp.className = 'spec';
+    if (it.error) { sp.classList.add('err'); sp.textContent = it.error; }
+    else if (!it.info) sp.textContent = '읽는 중…';
+    else sp.textContent = `${codecName(it.info.codec)} · ${(it.info.sampleRate / 1000).toFixed(1).replace('.0', '')} kHz · ${it.info.channels === 1 ? '모노' : '스테레오'} · ${fmtTime(it.info.duration)} · ${fmtSize(it.file.size)}`;
+    meta.append(nm, sp);
+    const acts = document.createElement('div'); acts.className = 'row-actions';
+    const mk = (label, txt, dis, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'icon-btn'; b.setAttribute('aria-label', label); b.textContent = txt; b.disabled = dis || state.busy; b.onclick = fn; return b; };
+    acts.append(
+      mk(`${it.file.name} 위로`, '↑', i === 0, () => move(i, -1)),
+      mk(`${it.file.name} 아래로`, '↓', i === state.items.length - 1, () => move(i, 1)),
+      mk(`${it.file.name} 빼기`, '✕', false, () => { state.items.splice(i, 1); invalidate(); }));
+    li.append(idx, meta, acts);
+    $('files').append(li);
+  });
+
+  const ready = state.items.length > 0 && state.items.every(i => i.info);
+  const bad = state.items.some(i => i.error);
+  let modeHtml = '';
+  if (ready && state.merger) {
+    const infos = state.items.map(i => i.info);
+    if (state.items.length === 1) modeHtml = `<div class="mode enc"><b>파일 1개</b><span>합칠 파일을 하나 더 넣어 주세요.</span></div>`;
+    else if (state.merger.canCopy(infos)) modeHtml = `<div class="mode copy"><b>무손실 모드</b><span>모두 같은 형식이라 다시 압축하지 않고 그대로 이어 붙여요. 음질 손실 없이 몇 초면 끝나요.</span></div>`;
+    else modeHtml = `<div class="mode enc"><b>변환 모드</b><span>형식이 서로 다르거나 그대로 이어 붙일 수 없는 형식이라 한 번 변환해요(모노 64 kbps). 무손실 모드보다 오래 걸려요.</span></div>`;
+  } else if (bad) {
+    modeHtml = `<div class="mode enc"><b>확인 필요</b><span>읽지 못한 파일을 빼면 합칠 수 있어요.</span></div>`;
+  }
+  $('mode').innerHTML = modeHtml;
+  $('mergeBtn').disabled = !(ready && state.items.length >= 2 && state.merger) || state.busy;
+  $('clearBtn').hidden = state.busy;
+}
+
+function move(i, d) {
+  const j = i + d; if (j < 0 || j >= state.items.length) return;
+  [state.items[i], state.items[j]] = [state.items[j], state.items[i]];
+  invalidate();
+}
+function invalidate() { state.result = null; $('resultPanel').hidden = true; setMsg(''); render(); }
+function setMsg(t, kind) { const m = $('msg'); m.hidden = !t; m.textContent = t; m.className = 'msg' + (kind ? ' ' + kind : ''); }
+
+async function addFiles(list) {
+  const files = [...list].filter(f => f.size > 0).sort((a, b) => a.name.localeCompare(b.name, 'ko', { numeric: true }));
+  if (!files.length) return;
+  const fresh = files.map(f => ({ file: f, info: null, error: null }));
+  state.items.push(...fresh);
+  invalidate();
+  if (!state.merger) await libReady;
+  for (const it of fresh) {
+    try { it.info = await state.merger.probe(it.file); }
+    catch (e) { it.error = '이 파일은 읽을 수 없어요. 오디오 파일이 맞는지 확인해 주세요.'; }
+    render();
+  }
+}
+
+/* ---------- inputs ---------- */
+$('picker').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+const drop = $('drop');
+['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+$('clearBtn').onclick = () => { state.items = []; invalidate(); };
+
+/* ---------- merge ---------- */
+$('mergeBtn').onclick = async () => {
+  if (state.busy) return;
+  state.busy = true; setMsg(''); render();
+  const infos = state.items.map(i => i.info);
+  const mode = state.merger.canCopy(infos) ? 'copy' : 'encode';
+  $('progress').hidden = false;
+  $('progText').textContent = mode === 'copy' ? '그대로 이어 붙이는 중' : '변환하며 이어 붙이는 중';
+  const t0 = performance.now();
+  const onProgress = p => { const pct = Math.min(100, Math.round(p * 100)); $('barFill').style.width = pct + '%'; $('progPct').textContent = pct + '%'; };
+  onProgress(0);
+  try {
+    // Re-open inputs so a second merge starts from a fresh read position.
+    const fresh = [];
+    for (const it of state.items) fresh.push(await state.merger.probe(it.file));
+    const r = await state.merger.merge(fresh, { mode, onProgress });
+    const secs = (performance.now() - t0) / 1000;
+    const base = (state.items[0].file.name.replace(/\.[^.]+$/, '') || '강의') + '_합본';
+    state.result = { m4a: new Uint8Array(r.buffer), mp3: null, base, files: state.items.map(i => i.file) };
+    $('rDur').textContent = fmtTime(r.duration);
+    $('rSize').textContent = fmtSize(r.buffer.byteLength);
+    $('rTime').textContent = secs < 60 ? secs.toFixed(1) + '초' : fmtTime(secs);
+    $('fmtM4a').checked = true; syncFormat();
+    $('resultPanel').hidden = false;
+    $('ask').hidden = false; $('transcribe').hidden = true;
+    $('saveMsg').hidden = true;
+    $('progText').textContent = '완료';
+  } catch (e) {
+    console.error(e);
+    setMsg('합치는 중에 문제가 생겼어요: ' + (e && e.message ? e.message : e) + ' — 크롬이나 엣지 최신 버전에서 다시 시도해 주세요.', 'err');
+    $('progress').hidden = true;
+  } finally {
+    state.busy = false; render();
+  }
+};
+
+/* ---------- save ---------- */
+const currentFormat = () => $('fmtMp3').checked ? 'mp3' : 'm4a';
+function syncFormat() {
+  const f = currentFormat(), r = state.result;
+  $('saveBtn').textContent = f === 'mp3' ? (r && r.mp3 ? 'MP3로 저장하기' : 'MP3로 변환해서 저장하기') : 'M4A로 저장하기';
+  if (r) {
+    $('resultName').textContent = r.base + '.' + f;
+    $('rSize').textContent = f === 'mp3' && r.mp3 ? fmtSize(r.mp3.byteLength) : fmtSize(r.m4a.byteLength);
+  }
+  $('saveMsg').hidden = true;
+}
+$('fmtM4a').addEventListener('change', syncFormat);
+$('fmtMp3').addEventListener('change', syncFormat);
+
+function saveFile(name, data, type) {
+  const url = URL.createObjectURL(new Blob([data], { type }));
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.hidden = true;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 120000);
+}
+
+let saving = false;
+$('saveBtn').onclick = async () => {
+  const r = state.result;
+  if (!r || saving) return;
+  const sm = $('saveMsg'); sm.className = 'msg';
+  const f = currentFormat();
+  saving = true; $('saveBtn').disabled = true; $('fmtM4a').disabled = $('fmtMp3').disabled = true;
+  try {
+    if (f === 'mp3' && !r.mp3) {
+      sm.hidden = true;
+      $('convProgress').hidden = false; $('convFill').style.width = '0%'; $('convPct').textContent = '0%';
+      try {
+        const fresh = [];
+        for (const file of r.files) fresh.push(await state.merger.probe(file));
+        const out = await state.merger.merge(fresh, { mode: 'encode', format: 'mp3', onProgress: p => {
+          const pct = Math.min(100, Math.round(p * 100)); $('convFill').style.width = pct + '%'; $('convPct').textContent = pct + '%'; } });
+        r.mp3 = new Uint8Array(out.buffer);
+      } catch (e) {
+        console.error(e);
+        sm.hidden = false; sm.className = 'msg err';
+        sm.textContent = 'MP3로 변환하지 못했어요: ' + (e && e.message ? e.message : e) + ' — M4A로 저장해 주세요.';
+        return;
+      } finally { $('convProgress').hidden = true; }
+      syncFormat();
+    }
+    saveFile(r.base + '.' + f, f === 'mp3' ? r.mp3 : r.m4a, f === 'mp3' ? 'audio/mpeg' : 'audio/mp4');
+    sm.hidden = false; sm.className = 'msg ok'; sm.textContent = '다운로드 폴더에 저장했어요';
+  } finally {
+    saving = false; $('saveBtn').disabled = false; $('fmtM4a').disabled = false; $('fmtMp3').disabled = !state.mp3Ok;
+  }
+};
+
+/* ---------- transcription prompt ---------- */
+$('yesBtn').onclick = () => { $('ask').hidden = true; $('transcribe').hidden = false; };
+$('noBtn').onclick = () => { $('ask').hidden = true; };
+$('copyBtn').onclick = async () => {
+  const cm = $('copyMsg'); cm.hidden = false; cm.className = 'msg';
+  try { await navigator.clipboard.writeText(PROMPT); cm.className = 'msg ok'; cm.textContent = '복사했어요'; }
+  catch {
+    const r = document.createRange(); r.selectNodeContents($('promptText'));
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    cm.textContent = '텍스트를 선택해 두었어요. Ctrl+C로 복사해 주세요.';
+  }
+};
+
+/* ---------- library ---------- */
+function makeMerger(MB) {
+  const { Input, ALL_FORMATS, BlobSource, EncodedPacketSink, AudioSampleSink, Output,
+    Mp4OutputFormat, BufferTarget, EncodedAudioPacketSource, AudioSampleSource, canEncodeAudio } = MB;
+  const bytes = a => !a ? null : (a instanceof ArrayBuffer ? new Uint8Array(a) : new Uint8Array(a.buffer, a.byteOffset, a.byteLength));
+  const sameBytes = (a, b) => {
+    const x = bytes(a), y = bytes(b);
+    if (!x || !y) return x === y;
+    if (x.length !== y.length) return false;
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+    return true;
+  };
+  async function probe(file) {
+    const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+    const track = await input.getPrimaryAudioTrack();
+    if (!track) throw new Error('no audio');
+    const [codec, sampleRate, channels, duration, config] = await Promise.all([
+      track.getCodec(), track.getSampleRate(), track.getNumberOfChannels(), input.computeDuration(), track.getDecoderConfig()]);
+    return { input, track, codec, sampleRate, channels, duration, config };
+  }
+  function canCopy(infos) {
+    const a = infos[0];
+    return infos.every(i => i.codec === 'aac' && i.config && i.sampleRate === a.sampleRate &&
+      i.channels === a.channels && sameBytes(i.config.description, a.config.description));
+  }
+  async function merge(infos, { mode, format = 'm4a', bitrate = 64000, onProgress = () => {} }) {
+    const total = infos.reduce((s, i) => s + i.duration, 0) || 1;
+    const output = new Output({
+      format: format === 'mp3' ? new MB.Mp3OutputFormat() : new Mp4OutputFormat({ fastStart: 'in-memory' }),
+      target: new BufferTarget() });
+    let offset = 0;
+    if (mode === 'copy') {
+      const src = new EncodedAudioPacketSource('aac');
+      output.addAudioTrack(src);
+      await output.start();
+      let first = true;
+      for (const info of infos) {
+        const sink = new EncodedPacketSink(info.track);
+        let base = null, end = 0, n = 0;
+        for await (const p of sink.packets()) {
+          if (base === null) base = p.timestamp;
+          await src.add(p.clone({ timestamp: offset + (p.timestamp - base) }), first ? { decoderConfig: info.config } : undefined);
+          first = false;
+          end = Math.max(end, p.timestamp - base + p.duration);
+          if (++n % 400 === 0) onProgress((offset + end) / total);
+        }
+        offset += end;
+      }
+    } else {
+      let codec = 'aac', sampleRate = 44100;
+      if (format === 'mp3') {
+        codec = 'mp3';
+        if (!(await canEncodeAudio('mp3', { numberOfChannels: 1, sampleRate, bitrate })))
+          throw new Error('MP3 변환 도구를 불러오지 못했어요');
+      } else if (!(await canEncodeAudio('aac', { numberOfChannels: 1, sampleRate, bitrate }))) {
+        codec = 'opus'; sampleRate = 48000;
+        if (!(await canEncodeAudio('opus', { numberOfChannels: 1, sampleRate, bitrate })))
+          throw new Error('이 브라우저는 오디오 변환을 지원하지 않아요');
+      }
+      const src = new AudioSampleSource({ codec, bitrate, transform: { numberOfChannels: 1, sampleRate } });
+      output.addAudioTrack(src);
+      await output.start();
+      for (const info of infos) {
+        const sink = new AudioSampleSink(info.track);
+        let base = null, end = 0, n = 0;
+        for await (const s of sink.samples()) {
+          if (base === null) base = s.timestamp;
+          const rel = s.timestamp - base;
+          end = Math.max(end, rel + s.duration);
+          s.setTimestamp(offset + rel);
+          await src.add(s);
+          s.close();
+          if (++n % 200 === 0) onProgress((offset + end) / total);
+        }
+        offset += end;
+      }
+    }
+    await output.finalize();
+    onProgress(1);
+    return { buffer: output.target.buffer, duration: offset };
+  }
+  return { probe, canCopy, merge };
+}
+
+const libReady = import('mediabunny')
+  .then(async MB => {
+    state.MB = MB; state.merger = makeMerger(MB); render();
+    try { (await import('@mediabunny/mp3-encoder')).registerMp3Encoder(); state.mp3Ok = true; }
+    catch (e) { console.error(e); $('fmtMp3').disabled = true; }
+  })
+  .catch(e => { console.error(e); setMsg('오디오 처리 도구를 불러오지 못했어요. 인터넷 연결을 확인하고 페이지를 새로고침해 주세요.', 'err'); });
+
+render();
+</script>
+</body>
+</html>
